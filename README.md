@@ -29,11 +29,11 @@ By default, VirusTotalAnalyzer only scans new downloads. To always scan:
 
     defaults write com.github.autopkg VIRUSTOTAL_ALWAYS_REPORT -bool true
 
-To automatically submit files that VirusTotal did not yet know about (only files smaller than 32MB will be submitted):
+To automatically submit files that VirusTotal did not yet know about (files smaller than 400MB will be submitted):
 
     defaults write com.github.autopkg VIRUSTOTAL_AUTO_SUBMIT -bool true
 
-To change the maximum file size for auto-submitting (default is 33554432 which equals 32MB):
+To change the maximum file size for auto-submitting (default is 419430400 which equals 400MB):
 
     defaults write com.github.autopkg VIRUSTOTAL_AUTO_SUBMIT_MAX_SIZE -int <bytes>
 
