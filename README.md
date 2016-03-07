@@ -41,7 +41,7 @@ To use your own VirusTotal API key:
 
     defaults write com.github.autopkg VIRUSTOTAL_API_KEY <your_api_key>
 
-Since the VirusTotal API is rate limited, it might be useful to add some sleep time (the default is 5):
+Since the VirusTotal API is rate limited, it might be useful to add some sleep time (the default is 15):
 
     defaults write com.github.autopkg VIRUSTOTAL_SLEEP_SECONDS -int <seconds>
 
