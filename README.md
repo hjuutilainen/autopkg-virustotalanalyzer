@@ -1,6 +1,6 @@
 # VirusTotalAnalyzer
 
-VirusTotalAnalyzer is an AutoPkg processor to query downloaded files from [VirusTotal](https://www.virustotal.com) database. It is designed to be used as a post processor for AutoPkg.
+VirusTotalAnalyzer is an [AutoPkg](https://autopkg.github.io/autopkg/) processor to query downloaded files from the [VirusTotal](https://www.virustotal.com) database. It is designed to be used as a post processor for AutoPkg.
 
 
 # Installing
