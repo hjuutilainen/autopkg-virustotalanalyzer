@@ -186,9 +186,10 @@ class VirusTotalAnalyzer(Processor):
             self.output("Skipping VirusTotal analysis: no input path defined.")
             return
 
-        sleep_seconds = self.env.get("VIRUSTOTAL_SLEEP_SECONDS", DEFAULT_SLEEP)
-        auto_submit = self.env.get("VIRUSTOTAL_AUTO_SUBMIT",
-                                   AUTO_SUBMIT_DEFAULT)
+        # Get variables and arguments
+        sleep_seconds = int(self.env.get("VIRUSTOTAL_SLEEP_SECONDS", DEFAULT_SLEEP))
+        auto_submit = self.env.get("VIRUSTOTAL_AUTO_SUBMIT", AUTO_SUBMIT_DEFAULT)
+        auto_submit_max_size = int(self.env.get("VIRUSTOTAL_AUTO_SUBMIT_MAX_SIZE", AUTO_SUBMIT_MAX_SIZE_DEFAULT))
 
         api_key = self.env.get("VIRUS_TOTAL_API_KEY", DEFAULT_API_KEY)
         if not api_key or api_key == "":
@@ -222,7 +223,7 @@ class VirusTotalAnalyzer(Processor):
                 self.output(
                     "Consider submitting the file for analysis at https://www.virustotal.com/")
             else:
-                if os.path.getsize(input_path) < AUTO_SUBMIT_MAX_SIZE_DEFAULT:
+                if os.path.getsize(input_path) < auto_submit_max_size:
                     self.output("Submitting the file for analysis...")
                     json_data = self.submit_file(input_path, api_key)
                     response_code = json_data.get("response_code", None)
