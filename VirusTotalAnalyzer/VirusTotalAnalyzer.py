@@ -39,7 +39,7 @@ class VirusTotalAnalyzer(Processor):
     """Queries VirusTotal database for information about the given file"""
     input_variables = {
         "pathname": {
-            "required": True,
+            "required": False,
             "description": "File path to analyze.",
         },
         "VIRUSTOTAL_ALWAYS_REPORT": {
@@ -182,6 +182,10 @@ class VirusTotalAnalyzer(Processor):
 
     def main(self):
         input_path = self.env.get("pathname", None)
+        if not input_path:
+            self.output("Skipping VirusTotal analysis: no input path defined.")
+            return
+
         sleep_seconds = self.env.get("VIRUSTOTAL_SLEEP_SECONDS", DEFAULT_SLEEP)
         auto_submit = self.env.get("VIRUSTOTAL_AUTO_SUBMIT",
                                    AUTO_SUBMIT_DEFAULT)
