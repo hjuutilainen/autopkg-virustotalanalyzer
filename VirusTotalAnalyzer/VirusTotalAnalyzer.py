@@ -191,7 +191,7 @@ class VirusTotalAnalyzer(Processor):
         auto_submit = self.env.get("VIRUSTOTAL_AUTO_SUBMIT", AUTO_SUBMIT_DEFAULT)
         auto_submit_max_size = int(self.env.get("VIRUSTOTAL_AUTO_SUBMIT_MAX_SIZE", AUTO_SUBMIT_MAX_SIZE_DEFAULT))
 
-        api_key = self.env.get("VIRUS_TOTAL_API_KEY", DEFAULT_API_KEY)
+        api_key = self.env.get("VIRUSTOTAL_API_KEY", DEFAULT_API_KEY)
         if not api_key or api_key == "":
             raise ProcessorError("No API key available")
 
