@@ -181,6 +181,10 @@ class VirusTotalAnalyzer(Processor):
         return hash_sha256.hexdigest()
 
     def main(self):
+        if self.env.get("VIRUSTOTAL_DISABLED", False):
+            self.output("Skipped VirusTotal analysis...")
+            return
+        
         input_path = self.env.get("pathname", None)
         if not input_path:
             self.output("Skipping VirusTotal analysis: no input path defined.")
