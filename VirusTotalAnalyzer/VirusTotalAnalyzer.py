@@ -269,7 +269,7 @@ class VirusTotalAnalyzer(Processor):
 
         # Save summary result
         self.env["virus_total_analyzer_summary_result"] = {
-            'summary_text': 'The following items were queried from VirusTotal database:',
+            'summary_text': 'The following items were queried from the VirusTotal database:',
             'report_fields': [
                 'name',
                 'ratio',
