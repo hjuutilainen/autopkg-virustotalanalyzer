@@ -22,6 +22,24 @@ Once installed and visible to AutoPkg, you can include the processor in an AutoP
 
     autopkg run -v --post "io.github.hjuutilainen.VirusTotalAnalyzer/VirusTotalAnalyzer" <recipes_to_run>
 
+If you need to disable VirusTotalAnalyzer for a single recipe, you can set the `VIRUSTOTAL_DISABLED` key to true to exclude it from future runs. The key should be set in the Input section of the override recipe. For example:
+
+```
+<dict>
+    <key>Identifier</key>
+    <string>local.my.override.recipe</string>
+    <key>Input</key>
+    <dict>
+        <key>VIRUSTOTAL_DISABLED</key>
+        <true />
+        <key>NAME</key>
+        <string>my_private_package</string>
+    </dict>
+    <key>ParentRecipe</key>
+    <string>com.some.other.recipe</string>
+</dict>
+```
+
 
 # Configurable options
 
