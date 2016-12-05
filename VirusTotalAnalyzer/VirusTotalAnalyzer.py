@@ -184,7 +184,7 @@ class VirusTotalAnalyzer(Processor):
         if self.env.get("VIRUSTOTAL_DISABLED", False):
             self.output("Skipped VirusTotal analysis...")
             return
-        
+
         input_path = self.env.get("pathname", None)
         if not input_path:
             self.output("Skipping VirusTotal analysis: no input path defined.")
@@ -212,6 +212,21 @@ class VirusTotalAnalyzer(Processor):
         # Calculate the SHA256 hash of the file for submitting
         self.output("Calculating checksum for %s" % input_path)
         input_path_hash = self.calculate_sha256(input_path)
+        
+        try:
+            last_virus_total_request = int(
+                os.environ.get('AUTOPKG_VIRUSTOTAL_LAST_RUN_TIME', 0))
+        except ValueError:
+            last_virus_total_request = 0
+        if last_virus_total_request and sleep_seconds > 0:
+            now = int(time.time())
+            next_time = last_virus_total_request + sleep_seconds
+            if now < next_time:
+                sleep_time = next_time - now
+                self.output(
+                    "Sleeping %s seconds before requesting report..."
+                    % sleep_time)
+                time.sleep(sleep_time)
 
         # Request details for the calculated hash
         self.output("Requesting report...")
@@ -267,6 +282,9 @@ class VirusTotalAnalyzer(Processor):
         num_total = json_data.get("total", 0)
         permalink = json_data.get("permalink", "None")
 
+        # record our time -- we use this to throttle our frequency
+        os.environ['AUTOPKG_VIRUSTOTAL_LAST_RUN_TIME'] = str(int(time.time()))
+        
         # Save summary result
         self.env["virus_total_analyzer_summary_result"] = {
             'summary_text': 'The following items were queried from the VirusTotal database:',
@@ -281,10 +299,6 @@ class VirusTotalAnalyzer(Processor):
                 'permalink': permalink,
             }
         }
-
-        if sleep_seconds > 0:
-            self.output("Sleeping %s seconds..." % sleep_seconds)
-            time.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":
