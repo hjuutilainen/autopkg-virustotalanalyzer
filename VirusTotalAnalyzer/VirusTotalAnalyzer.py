@@ -63,7 +63,7 @@ class VirusTotalAnalyzer(Processor):
     }
     description = __doc__
 
-    def fetch_content(self, url, headers=None, form_parameters=None, data_parameters=None, curl_options=None):
+    def fetch_content(self, url, headers=None, form_parameters=None, data_parameters=None, curl_options=None, return_status=False):
         """Returns content retrieved by curl, given an url and an optional
         dictionaries of header-name/value mappings and parameters.
         Logic here borrowed from URLTextSearcher processor.
@@ -79,11 +79,18 @@ class VirusTotalAnalyzer(Processor):
         :type data_parameters: dict None
         :param curl_options: Array of arguments to pass to curl
         :type curl_options: list None
-        :returns: content as string
+        :param return_status: Return HTTP status code along with content
+        :type return_status: bool False
+        :returns: content as string, or (content, status_code) tuple if return_status=True
         """
 
         try:
             cmd = [self.env['CURL_PATH'], '--location']
+
+            # Add status code output if requested (for v3 API)
+            if return_status:
+                cmd.extend(['-w', '\n%{http_code}'])
+
             if curl_options:
                 cmd.extend(curl_options)
             if headers:
@@ -99,74 +106,209 @@ class VirusTotalAnalyzer(Processor):
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (data, stderr) = proc.communicate()
-            if proc.returncode:
-                raise ProcessorError(
-                    'Could not retrieve URL %s: %s' % (url, stderr))
+
+            if return_status:
+                # Split content and status code
+                data_str = data.decode('utf-8') if isinstance(data, bytes) else data
+                lines = data_str.rsplit('\n', 1)
+                if len(lines) == 2:
+                    content = lines[0]
+                    try:
+                        status_code = int(lines[1])
+                    except (ValueError, TypeError):
+                        # Malformed status code, treat as error
+                        self.output("Warning: Could not parse HTTP status code from curl output")
+                        content = data_str
+                        status_code = 0
+                else:
+                    content = data_str
+                    status_code = 0
+
+                # Don't raise error for expected HTTP statuses (404 is valid for "not found")
+                if proc.returncode and status_code not in [404]:
+                    raise ProcessorError(
+                        'Could not retrieve URL %s: %s' % (url, stderr.decode('utf-8') if isinstance(stderr, bytes) else stderr))
+
+                return content, status_code
+            else:
+                if proc.returncode:
+                    raise ProcessorError(
+                        'Could not retrieve URL %s: %s' % (url, stderr.decode('utf-8') if isinstance(stderr, bytes) else stderr))
+                return data.decode('utf-8') if isinstance(data, bytes) else data
+
         except OSError:
             raise ProcessorError('Could not retrieve URL: %s' % url)
 
-        return data
-
     def submit_file(self, file_path, api_key):
-        """Submit a file to VirusTotal for scanning
+        """Submit a file to VirusTotal for scanning (API v3)
 
         :param file_path: Path to a file to upload
         :param api_key: API key to use
-        :returns: JSON response
+        :returns: JSON response (normalized to v2 format)
         """
-        url = "https://www.virustotal.com/vtapi/v2/file/scan/upload_url"
+        # v3 endpoint for getting upload URL
+        url = "https://www.virustotal.com/api/v3/files/upload_url"
+
+        # v3 uses header authentication
+        headers = {"x-apikey": api_key}
 
         # Get the upload URL
-        parameters = {"apikey": api_key}
-        f = self.fetch_content(url, None, None, parameters, ["-G"])
         try:
-            json_data = json.loads(f)
+            f, status_code = self.fetch_content(url, headers, return_status=True)
+        except ProcessorError as e:
+            self.output("Network error getting upload URL: %s" % e)
+            return {
+                'response_code': 999,
+                'verbose_msg': 'Requesting upload URL failed: %s' % str(e),
+                'scan_id': None,
+                'permalink': None
+            }
+
+        if status_code != 200:
+            self.output("HTTP error getting upload URL: %d" % status_code)
+            return {
+                'response_code': 999,
+                'verbose_msg': 'HTTP %d error getting upload URL' % status_code,
+                'scan_id': None,
+                'permalink': None
+            }
+
+        try:
+            upload_response = json.loads(f)
         except (ValueError, KeyError, TypeError) as e:
             self.output("Response was: %s" % f)
             self.output("JSON format error: %s" % e)
-            json_data = json.loads(
-                '{"response_code": 999, "verbose_msg": "Requesting upload URL failed..."}')
-            return json_data
+            return {
+                'response_code': 999,
+                'verbose_msg': 'Requesting upload URL failed: invalid JSON',
+                'scan_id': None,
+                'permalink': None
+            }
 
-        upload_url = json_data.get('upload_url', None)
+        # v3 returns upload URL directly in 'data' field (string)
+        upload_url = upload_response.get('data', None)
         if upload_url is None:
-            return None
+            self.output("No upload URL in response: %s" % upload_response)
+            return {
+                'response_code': 999,
+                'verbose_msg': 'No upload URL returned',
+                'scan_id': None,
+                'permalink': None
+            }
 
         # Upload the file
         file_path_for_post = "@%s" % file_path
-        parameters = {"file": file_path_for_post, "apikey": api_key}
-        f = self.fetch_content(upload_url, None, parameters)
+        form_params = {"file": file_path_for_post}
+
         try:
-            json_data = json.loads(f)
+            f, status_code = self.fetch_content(upload_url, headers, form_params, return_status=True)
+        except ProcessorError as e:
+            self.output("Network error uploading file: %s" % e)
+            return {
+                'response_code': 999,
+                'verbose_msg': 'File upload failed: %s' % str(e),
+                'scan_id': None,
+                'permalink': None
+            }
+
+        if status_code != 200:
+            self.output("HTTP error uploading file: %d" % status_code)
+            return {
+                'response_code': 999,
+                'verbose_msg': 'HTTP %d error uploading file' % status_code,
+                'scan_id': None,
+                'permalink': None
+            }
+
+        try:
+            v3_response = json.loads(f)
         except (ValueError, KeyError, TypeError) as e:
             self.output("Response was: %s" % f)
             self.output("JSON format error: %s" % e)
-            json_data = json.loads(
-                '{"response_code": 999, "verbose_msg": "Request failed, perhaps rate-limited..."}')
+            return {
+                'response_code': 999,
+                'verbose_msg': 'Request failed: invalid JSON response',
+                'scan_id': None,
+                'permalink': None
+            }
 
-        # print json.dumps(json_data, sort_keys=True, indent=4)
-        return json_data
+        # Normalize v3 upload response to v2 format
+        return self._normalize_v3_upload_response(v3_response)
 
     def report_for_hash(self, file_hash, api_key):
-        """Request a VirusTotal report for a hash
+        """Request a VirusTotal report for a hash (API v3)
 
         :param file_hash: md5, sha1 or sha256 hash
         :param api_key: API key to use
-        :returns: JSON response
+        :returns: JSON response (normalized to v2 format)
         """
-        url = "https://www.virustotal.com/vtapi/v2/file/report"
-        parameters = {"resource": file_hash, "apikey": api_key}
-        f = self.fetch_content(url, None, parameters)
+        # v3 endpoint with hash in URL path
+        url = "https://www.virustotal.com/api/v3/files/%s" % file_hash
+
+        # v3 uses header authentication
+        headers = {"x-apikey": api_key}
+
         try:
-            json_data = json.loads(f)
+            # v3 uses GET request (no data parameters)
+            f, status_code = self.fetch_content(url, headers, return_status=True)
+        except ProcessorError as e:
+            # Network error
+            self.output("Network error: %s" % e)
+            return {
+                'response_code': 999,
+                'verbose_msg': 'Request failed: %s' % str(e),
+                'positives': 0,
+                'total': 0,
+                'permalink': None
+            }
+
+        # Handle HTTP status codes
+        if status_code == 404:
+            # File not in database
+            return {
+                'response_code': 0,
+                'verbose_msg': 'The requested resource is not among the finished, queued or pending scans',
+                'positives': 0,
+                'total': 0,
+                'permalink': None
+            }
+        elif status_code == 429:
+            # Rate limited
+            self.output("Rate limited by VirusTotal API")
+            return {
+                'response_code': 999,
+                'verbose_msg': 'Request rate limited, try again later',
+                'positives': 0,
+                'total': 0,
+                'permalink': None
+            }
+        elif status_code != 200:
+            # Other HTTP error
+            self.output("HTTP error: %d" % status_code)
+            return {
+                'response_code': 999,
+                'verbose_msg': 'HTTP %d error' % status_code,
+                'positives': 0,
+                'total': 0,
+                'permalink': None
+            }
+
+        # Parse JSON response
+        try:
+            v3_response = json.loads(f)
         except (ValueError, KeyError, TypeError) as e:
             self.output("JSON response was: %s" % f)
             self.output("JSON format error: %s" % e)
-            json_data = json.loads(
-                '{"response_code": 999, "verbose_msg": "Request failed, perhaps rate-limited..."}')
+            return {
+                'response_code': 999,
+                'verbose_msg': 'Invalid JSON response',
+                'positives': 0,
+                'total': 0,
+                'permalink': None
+            }
 
-        # print json.dumps(json_data, sort_keys=True, indent=4)
-        return json_data
+        # Normalize v3 response to v2 format
+        return self._normalize_v3_response(v3_response, file_hash)
 
     def calculate_sha256(self, file_path):
         """Calculates a SHA256 checksum
@@ -179,6 +321,130 @@ class VirusTotalAnalyzer(Processor):
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_sha256.update(chunk)
         return hash_sha256.hexdigest()
+
+    def _normalize_v3_response(self, v3_response, file_hash):
+        """Convert v3 API response to v2-compatible format
+
+        This allows main() logic to remain largely unchanged.
+
+        :param v3_response: Raw v3 API JSON response
+        :param file_hash: The file hash used in the request
+        :returns: v2-compatible JSON structure
+        """
+        # Check for v3 error response
+        if 'error' in v3_response:
+            error_code = v3_response['error'].get('code', '')
+            error_msg = v3_response['error'].get('message', 'Unknown error')
+
+            if error_code == 'NotFoundError':
+                # File not in database
+                return {
+                    'response_code': 0,
+                    'verbose_msg': 'The requested resource is not among the finished, queued or pending scans',
+                    'positives': 0,
+                    'total': 0,
+                    'permalink': None
+                }
+            else:
+                # Other errors (rate limiting, etc.)
+                return {
+                    'response_code': 999,
+                    'verbose_msg': error_msg,
+                    'positives': 0,
+                    'total': 0,
+                    'permalink': None
+                }
+
+        # Extract v3 data structure
+        data = v3_response.get('data', {})
+        if not data:
+            return {
+                'response_code': 999,
+                'verbose_msg': 'Unexpected API response format',
+                'positives': 0,
+                'total': 0,
+                'permalink': None
+            }
+
+        attributes = data.get('attributes', {})
+        file_id = data.get('id', file_hash)
+
+        # Calculate positives/total from last_analysis_stats
+        stats = attributes.get('last_analysis_stats', {})
+
+        # Positives = malicious + suspicious
+        positives = stats.get('malicious', 0) + stats.get('suspicious', 0)
+
+        # Total = sum of all detection categories
+        total = sum([
+            stats.get('malicious', 0),
+            stats.get('suspicious', 0),
+            stats.get('harmless', 0),
+            stats.get('undetected', 0),
+            stats.get('timeout', 0),
+            stats.get('failure', 0),
+            stats.get('type-unsupported', 0)
+        ])
+
+        # Build v3 permalink
+        permalink = "https://www.virustotal.com/gui/file/%s" % file_id if file_id else None
+
+        # Convert last_analysis_date (Unix timestamp) to human-readable
+        scan_date = attributes.get('last_analysis_date', None)
+        if scan_date:
+            # v2 format was like "2017-08-10 12:34:56" in UTC
+            from datetime import datetime
+            scan_date = datetime.utcfromtimestamp(scan_date).strftime('%Y-%m-%d %H:%M:%S')
+
+        return {
+            'response_code': 1,
+            'verbose_msg': 'Scan finished, information embedded',
+            'positives': positives,
+            'total': total,
+            'scan_id': file_id,
+            'scan_date': scan_date,
+            'permalink': permalink
+        }
+
+    def _normalize_v3_upload_response(self, v3_response):
+        """Convert v3 upload response to v2-compatible format
+
+        :param v3_response: Raw v3 upload API JSON response
+        :returns: v2-compatible JSON structure
+        """
+        # Check for v3 error response
+        if 'error' in v3_response:
+            error_msg = v3_response['error'].get('message', 'Upload failed')
+            return {
+                'response_code': 999,
+                'verbose_msg': error_msg,
+                'scan_id': None,
+                'permalink': None
+            }
+
+        # v3 upload response: {"data": {"type": "analysis", "id": "...", "links": {"self": "..."}}}
+        data = v3_response.get('data', {})
+        if not data:
+            return {
+                'response_code': 999,
+                'verbose_msg': 'Unexpected upload response format',
+                'scan_id': None,
+                'permalink': None
+            }
+
+        analysis_id = data.get('id', '')
+
+        # Build GUI permalink for the analysis (not the API link)
+        # v3 API returns links.self which points to the API, but users need the GUI URL
+        permalink = "https://www.virustotal.com/gui/analysis/%s" % analysis_id if analysis_id else None
+
+        # Convert to v2 format
+        return {
+            'response_code': 1,
+            'verbose_msg': 'Scan request successfully queued, come back later for the report',
+            'scan_id': analysis_id,
+            'permalink': permalink
+        }
 
     def main(self):
         if self.env.get("VIRUSTOTAL_DISABLED", False):
@@ -269,7 +535,10 @@ class VirusTotalAnalyzer(Processor):
             self.output("Scan date: %s" % scan_date)
             self.output("Permalink: %s" % permalink)
         elif response_code == -2:
-            # Requested item is still queued for analysis
+            # NOTE: This case is obsolete with API v3. The v3 API does not return
+            # a separate "queued for analysis" state. This block is kept for
+            # documentation purposes but will never be reached with v3 responses.
+            # Requested item is still queued for analysis (v2 only)
             verbose_msg = json_data.get("verbose_msg", None)
             scan_id = json_data.get("scan_id", None)
             permalink = json_data.get("permalink", None)

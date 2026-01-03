@@ -2,6 +2,8 @@
 
 VirusTotalAnalyzer is an [AutoPkg](https://autopkg.github.io/autopkg/) processor to query downloaded files from the [VirusTotal](https://www.virustotal.com) database. It is designed to be used as a post processor for AutoPkg.
 
+**Note:** This processor now uses VirusTotal API v3. The v2 API has been deprecated by VirusTotal.
+
 
 # Installing
 
@@ -11,7 +13,7 @@ Clone this repo to any of the folders included in AutoPkg's search path or use t
 
 To check your installation, run `autopkg list-recipes` and verify that `VirusTotalAnalyzer` stub recipe is included in the list.
 
-The following is _not_ required: If you want to provide your own VirusTotal API key, register for an account at [https://www.virustotal.com](https://www.virustotal.com). Then go to the "My API Key" page, copy the key and run:
+The following is _not_ required: If you want to provide your own VirusTotal API key, register for an account at [https://www.virustotal.com](https://www.virustotal.com). Then go to your account settings to retrieve your API key and run:
 
     defaults write com.github.autopkg VIRUSTOTAL_API_KEY <your_api_key_here>
 
